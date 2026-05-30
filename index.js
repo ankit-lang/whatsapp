@@ -126,7 +126,7 @@ app.post('/api/v1/send-lead', async (req, res) => {
         const isRegistered = await client.isRegisteredUser(structuralChatId);
         if (!isRegistered) {
             console.log(`⚠️ Number ${cleanDestinationNumber} is not active on WhatsApp.`);
-            return res.status(400).json({ success: false, error: 'The provided phone number is not active on WhatsApp.' });
+            return res.status(400).json({ success: false, error: 'Thee provided phone number is not active on WhatsApp.' });
         }
 
         let textTemplate = '';
