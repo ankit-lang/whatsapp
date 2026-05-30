@@ -5,7 +5,6 @@ const QRCode = require('qrcode');
 const app = express();
 app.use(express.json());
 
-// Memory store to keep track of current machine states
 let currentSessionState = {
     qrRawString: null,
     isReady: false
@@ -36,7 +35,6 @@ const client = new Client({
     }
 });
 
-// Cache the latest token string when WhatsApp refreshes authorization
 client.on('qr', (qr) => {
     currentSessionState.qrRawString = qr;
     currentSessionState.isReady = false;
@@ -49,9 +47,8 @@ client.on('ready', () => {
     console.log('✅ WhatsApp Stream Hooked up and Monitoring Inputs.');
 });
 
-// Root HTML UI rendering path for Hugging Face Viewport
+// Root UI rendering path for Hugging Face Viewport
 app.get('/', async (req, res) => {
-    // Scenario A: Client setup is complete
     if (currentSessionState.isReady) {
         return res.send(`
             <div style="font-family:sans-serif; text-align:center; margin-top:100px;">
@@ -61,7 +58,6 @@ app.get('/', async (req, res) => {
         `);
     }
 
-    // Scenario B: Waiting for initialization scan
     if (currentSessionState.qrRawString) {
         try {
             const dataUrlImg = await QRCode.toDataURL(currentSessionState.qrRawString, { width: 350, margin: 2 });
@@ -83,7 +79,6 @@ app.get('/', async (req, res) => {
         }
     }
 
-    // Scenario C: Booting runtime containers
     return res.send(`
         <div style="font-family:sans-serif; text-align:center; margin-top:100px;">
             <h2>⏳ Initializing Engine Environment...</h2>
@@ -95,25 +90,29 @@ app.get('/', async (req, res) => {
     `);
 });
 
+// Primary operational endpoint mapping
 app.post('/api/v1/send-lead', async (req, res) => {
     const { name, email, phone, message } = req.body;
 
-    if (!name || !email) {
-        return res.status(400).json({ success: false, error: 'Missing baseline identity profiles.' });
+    // Safety check to ensure a phone number was passed down
+    if (!name || !email || !phone) {
+        return res.status(400).json({ success: false, error: 'Missing baseline profile details (name, email, or phone).' });
     }
 
-    const targetDestinationNumber = "918178573528"; // Change to your active number
+    // Strips out '+', spaces, brackets, or hyphens from the form number (e.g., '+31 6 123' becomes '316123')
+    const cleanDestinationNumber = phone.replace(/\D/g, ''); 
 
-    const textTemplate = `📩 *New Lead Captured*\n\n` +
-                         `👤 *Name:* ${name}\n` +
-                         `📧 *Email:* ${email}\n` +
-                         `📞 *Phone:* ${phone || 'Not Left'}\n` +
-                         `💬 *Message:* ${message || 'None'}`;
+    const textTemplate = `📩 *Reservation Confirmation*\n\n` +
+                         `Hello ${name},\n\n` +
+                         `Thank you for your booking! Here are your reservation details:\n` +
+                         `${message}\n\n` +
+                         `See you soon! 🍽️`;
 
     try {
-        const structuralChatId = `${targetDestinationNumber}@c.us`;
+        // Construct the structural WhatsApp Chat ID directly using the clean submitted number
+        const structuralChatId = `${cleanDestinationNumber}@c.us`;
         await client.sendMessage(structuralChatId, textTemplate);
-        return res.status(200).json({ success: true, message: 'Data transmitted successfully.' });
+        return res.status(200).json({ success: true, message: 'Message sent directly to the customer.' });
     } catch (err) {
         return res.status(500).json({ success: false, error: err.message });
     }
@@ -121,6 +120,6 @@ app.post('/api/v1/send-lead', async (req, res) => {
 
 const APP_PORT = 7860;
 app.listen(APP_PORT, '0.0.0.0', () => {
-    console.log(`🚀 API Containerr active on port ${APP_PORT}`);
+    console.log(`🚀 API Container active on port ${APP_PORT}`);
     client.initialize();
 });
