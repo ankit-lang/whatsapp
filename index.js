@@ -121,6 +121,6 @@ app.post('/api/v1/send-lead', async (req, res) => {
 
 const APP_PORT = 7860;
 app.listen(APP_PORT, '0.0.0.0', () => {
-    console.log(`🚀 API Container active on port ${APP_PORT}`);
+    console.log(`🚀 API Containerr active on port ${APP_PORT}`);
     client.initialize();
 });
