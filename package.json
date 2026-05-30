@@ -1,0 +1,14 @@
+{
+  "name": "hf-whatsapp-gateway",
+  "version": "1.0.0",
+  "description": "WhatsApp Web API Gateway on Hugging Face Spaces",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "whatsapp-web.js": "^1.26.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
