@@ -139,13 +139,13 @@ app.post('/api/v1/send-lead', async (req, res) => {
             // Layout Structure for Form 2: Generic Contact
             textTemplate = `📩 *Contact Form Submission*\n\n` +
                            `Hello ${finalName},\n\n` +
-                           `We have safely received your inquiry! Here is a copy of your submission:\n\n` +
+                           `Thank you for choosing us. Get ready for great food, good vibes, and a wonderful time ahead! See you soon!\n\n` +
                            `👤 *Name:* ${finalName}\n` +
                            `📧 *Email:* ${email}\n` +
                            `📞 *Phone:* +${cleanDestinationNumber}\n` +
                            `📌 *Subject:* ${subject || 'No Subject'}\n` +
                            `💬 *Message:* ${message || 'No Message'}\n\n` +
-                           `Our support team will connect with you shortly. 💬`;
+                           `See You Soon! 💬`;
         }
 
         await client.sendMessage(structuralChatId, textTemplate);
