@@ -102,11 +102,12 @@ app.post('/api/v1/send-lead', async (req, res) => {
     // Strips out '+', spaces, brackets, or hyphens from the form number (e.g., '+31 6 123' becomes '316123')
     const cleanDestinationNumber = phone.replace(/\D/g, ''); 
 
-    const textTemplate = `📩 *Reservation Confirmation*\n\n` +
+    const textTemplate = `*Reservation Confirmation*\n\n` +
                          `Hello ${name},\n\n` +
-                         `Thank you for your booking! Here are your reservation details:\n` +
-                         `${message}\n\n` +
-                         `See you soon! 🍽️`;
+                         `
+Thank you for choosing us. Get ready for great food, good vibes, and a wonderful time ahead!` +
+                        
+                         `See you soon!`;
 
     try {
         // Construct the structural WhatsApp Chat ID directly using the clean submitted number
