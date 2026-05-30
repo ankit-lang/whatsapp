@@ -21,6 +21,7 @@ app.use((req, res, next) => {
 });
 
 // 3. Configure Headless WhatsApp Puppeteer Subprocess
+// Configure a highly stable, multi-process Chromium layout for Docker environments
 const client = new Client({
     authStrategy: new LocalAuth({ dataPath: './session_store' }),
     puppeteer: {
@@ -30,10 +31,10 @@ const client = new Client({
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
             '--no-zygote',
-            '--single-process'
+            '--disable-gpu',
+            '--no-first-run'
+            // ❌ REMOVED '--single-process' to prevent container thread execution crashes
         ]
     }
 });
