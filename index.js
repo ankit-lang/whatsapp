@@ -9,7 +9,7 @@ app.use(express.json());
 let currentSessionState = {
     pairingCode: null,
     isReady: false,
-    initializationTarget: '31630645930' // 👈 Set Lavina's absolute destination number (with country code, no symbols) here
+    initializationTarget: '918178573528' // 👈 Set Lavina's absolute destination number (with country code, no symbols) here
 };
 
 // 2. Enable Cross-Origin Resource Sharing (CORS)
