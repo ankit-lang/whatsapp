@@ -2,7 +2,6 @@ const express = require('express');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
 
-
 // 1. Initialize Express App
 const app = express();
 app.use(express.json());
@@ -41,7 +40,6 @@ const client = new Client({
 
 // Intercept pairing string sequence instead of parsing raw QR frames
 client.on('qr', async (qr) => {
-    // If we haven't fetched a pairing code yet, request it now
     if (!currentSessionState.pairingCode && !currentSessionState.isReady) {
         try {
             console.log(`🔄 Requesting Pairing string wrapper for: ${currentSessionState.initializationTarget}`);
@@ -101,12 +99,15 @@ app.get('/', async (req, res) => {
     `);
 });
 
-// 5. Shared Multi-Form Routing POST Endpoint
+// 5. Shared Multi-Form Routing POST Endpoint (With Dynamic Field Conditioning)
 app.post('/api/v1/send-lead', async (req, res) => {
     const { 
         name, fullName, email, phone, 
         date, time, persons, foundVia, dob, notes, 
-        subject, message                            
+        subject, message, serviceType, eventType,
+        eventDate, eventTime, preferredTiming, numGuests,
+        venue, kitchenSetup, vegNonVeg, dietaryRequirements,
+        cateringType, staffRequired, crockeryRequired
     } = req.body;
 
     const finalName = name || fullName;
@@ -126,38 +127,65 @@ app.post('/api/v1/send-lead', async (req, res) => {
         const isRegistered = await client.isRegisteredUser(structuralChatId);
         if (!isRegistered) {
             console.log(`⚠️ Number ${cleanDestinationNumber} is not active on WhatsApp.`);
-            return res.status(400).json({ success: false, error: 'Thee provided phone number is not active on WhatsApp.' });
+            return res.status(400).json({ success: false, error: 'The provided phone number is not active on WhatsApp.' });
         }
 
-        let textTemplate = '';
-
-        if (date || time || persons) {
-            textTemplate = `📩 *Reservation Confirmation*\n\n` +
-                           `Hello ${finalName},\n\n` +
-                           `Thank you for choosing us. Get ready for great food, good vibes, and a wonderful time ahead! See you soon!:\n\n` +
-                           `👤 *Name:* ${finalName}\n` +
-                           `📧 *Email:* ${email}\n` +
-                           `📞 *Phone:* +${cleanDestinationNumber}\n` +
-                           `🗓️ *Date:* ${date}\n` +
-                           `⏰ *Time:* ${time}\n` +
-                           `👥 *Persons:* ${persons}\n` +
-                           `🎂 *DOB:* ${dob || 'N/A'}\n` +
-                           `🔍 *Found Via:* ${foundVia || 'N/A'}\n` +
-                           `📝 *Special Requests:* ${notes || 'None'}\n\n` +
-                           `See you soon! 🍽️`;
+        // --- DYNAMIC CONDITIONING LOGIC START ---
+        
+        // Define header depending on layout context
+        let headerText = '';
+        if (serviceType) {
+            headerText = `📩 *New ${serviceType.toUpperCase()} Inquiry*\n\n`;
+        } else if (date || time || persons) {
+            headerText = `📩 *Reservation Confirmation*\n\n`;
         } else {
-            textTemplate = `📩 *Contact Form Submission*\n\n` +
-                           `Hello ${finalName},\n\n` +
-                           `Thank you for choosing us. Get ready for great food, good vibes, and a wonderful time ahead!\n\n` +
-                           `👤 *Name:* ${finalName}\n` +
-                           `📧 *Email:* ${email}\n` +
-                           `📞 *Phone:* +${cleanDestinationNumber}\n` +
-                           `📌 *Subject:* ${subject || 'No Subject'}\n` +
-                           `💬 *Message:* ${message || 'No Message'}\n\n` +
-                           `We will revert to you shortly.\n\n` +
-                           `Warm regards,\n` +
-                           `Team Chopras`;
+            headerText = `📩 *Contact Form Submission*\n\n`;
         }
+
+        let greetingText = `Hello ${finalName},\n\nThank you for choosing us. Get ready for great food, good vibes, and a wonderful time ahead!\n\n`;
+
+        // Map data fields to custom emojis and display names
+        const fieldMap = [
+            { key: 'serviceType', label: '🛠️ *Service Type*' },
+            { key: 'eventType', label: '🎉 *Event Type*' },
+            { key: 'date', label: '🗓️ *Date*' },
+            { key: 'eventDate', label: '🗓️ *Event Date*' },
+            { key: 'time', label: '⏰ *Time*' },
+            { key: 'eventTime', label: '⏰ *Event Time*' },
+            { key: 'preferredTiming', label: '⏱️ *Preferred Timing*' },
+            { key: 'persons', label: '👥 *Persons*' },
+            { key: 'numGuests', label: '👥 *Number of Guests*' },
+            { key: 'venue', label: '📍 *Venue Location*' },
+            { key: 'kitchenSetup', label: '🍳 *Kitchen Setup*' },
+            { key: 'vegNonVeg', label: '🥗 *Food Preference*' },
+            { key: 'cateringType', label: '🍽️ *Catering Type*' },
+            { key: 'dietaryRequirements', label: '⚠️ *Dietary Requirements*' },
+            { key: 'staffRequired', label: '🧑‍🍳 *Staff Required*' },
+            { key: 'crockeryRequired', label: '🍽️ *Crockery Required*' },
+            { key: 'dob', label: '🎂 *DOB*' },
+            { key: 'foundVia', label: '🔍 *Found Via*' },
+            { key: 'subject', label: '📌 *Subject*' },
+            { key: 'notes', label: '📝 *Special Requests*' },
+            { key: 'message', label: '💬 *Message*' }
+        ];
+
+        // Core base details that always exist
+        let bodyText = `👤 *Name:* ${finalName}\n` +
+                       `📧 *Email:* ${email}\n` +
+                       `📞 *Phone:* +${cleanDestinationNumber}\n`;
+
+        // Loop through mappings and dynamically append to message body if data is present
+        fieldMap.forEach(field => {
+            const value = req.body[field.key];
+            if (value !== undefined && value !== null && String(value).trim() !== '') {
+                bodyText += `${field.label}: ${value}\n`;
+            }
+        });
+
+        let footerText = `\nSee you soon! 🍽️\nWarm regards,\nTeam Chopras`;
+        const textTemplate = `${headerText}${greetingText}${bodyText}${footerText}`;
+
+        // --- DYNAMIC CONDITIONING LOGIC END ---
 
         await client.sendMessage(structuralChatId, textTemplate);
         return res.status(200).json({ success: true, message: 'Message routed successfully.' });
