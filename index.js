@@ -2,17 +2,18 @@ const express = require('express');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
 
-// 1. Initialize Express App
+// Helper function to simulate human-like variable delays
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 const app = express();
 app.use(express.json());
 
 let currentSessionState = {
     pairingCode: null,
     isReady: false,
-    initializationTarget: '31630645930' // 👈 Set Lavina's absolute destination number (with country code, no symbols) here
+    initializationTarget: '31630645930' 
 };
 
-// 2. Enable Cross-Origin Resource Sharing (CORS)
 app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
@@ -21,7 +22,6 @@ app.use((req, res, next) => {
     next();
 });
 
-// 3. Configure Headless WhatsApp Puppeteer Subprocess
 const client = new Client({
     authStrategy: new LocalAuth({ dataPath: './session_store' }),
     puppeteer: {
@@ -38,7 +38,6 @@ const client = new Client({
     }
 });
 
-// Intercept pairing string sequence instead of parsing raw QR frames
 client.on('qr', async (qr) => {
     if (!currentSessionState.pairingCode && !currentSessionState.isReady) {
         try {
@@ -58,7 +57,6 @@ client.on('ready', () => {
     console.log('✅ WhatsApp Stream Hooked up and Monitoring Inputs.');
 });
 
-// 4. Root HTML UI Dashboard Viewport Route (Optimized for Screen Share)
 app.get('/', async (req, res) => {
     if (currentSessionState.isReady) {
         return res.send(`
@@ -99,7 +97,6 @@ app.get('/', async (req, res) => {
     `);
 });
 
-// 5. Shared Multi-Form Routing POST Endpoint (With Dynamic Field Conditioning)
 app.post('/api/v1/send-lead', async (req, res) => {
     const { 
         name, fullName, email, phone, 
@@ -124,14 +121,11 @@ app.post('/api/v1/send-lead', async (req, res) => {
             return res.status(503).json({ success: false, error: 'WhatsApp client session is not authenticated yet.' });
         }
 
-        const isRegistered = await client.isRegisteredUser(structuralChatId);
-        if (!isRegistered) {
-            console.log(`⚠️ Number ${cleanDestinationNumber} is not active on WhatsApp.`);
-            return res.status(400).json({ success: false, error: 'The provided phone number is not active on WhatsApp.' });
-        }
+        // --- ANTI-BAN HUMAN DELAY MECHANIC ---
+        // Generates a random sleep timer between 3 to 7 seconds before triggering layout builds
+        const randomSleepTime = Math.floor(Math.random() * (7000 - 3000 + 1)) + 3000;
+        await delay(randomSleepTime);
 
-        // --- DYNAMIC CONDITIONING LOGIC START ---
-        
         // Define header depending on layout context
         let headerText = '';
         if (serviceType) {
@@ -144,7 +138,6 @@ app.post('/api/v1/send-lead', async (req, res) => {
 
         let greetingText = `Hello ${finalName},\n\nThank you for choosing us. Get ready for great food, good vibes, and a wonderful time ahead!\n\n`;
 
-        // Map data fields to custom emojis and display names
         const fieldMap = [
             { key: 'serviceType', label: '🛠️ *Service Type*' },
             { key: 'eventType', label: '🎉 *Event Type*' },
@@ -169,12 +162,10 @@ app.post('/api/v1/send-lead', async (req, res) => {
             { key: 'message', label: '💬 *Message*' }
         ];
 
-        // Core base details that always exist
         let bodyText = `👤 *Name:* ${finalName}\n` +
                        `📧 *Email:* ${email}\n` +
                        `📞 *Phone:* +${cleanDestinationNumber}\n`;
 
-        // Loop through mappings and dynamically append to message body if data is present
         fieldMap.forEach(field => {
             const value = req.body[field.key];
             if (value !== undefined && value !== null && String(value).trim() !== '') {
@@ -182,11 +173,14 @@ app.post('/api/v1/send-lead', async (req, res) => {
             }
         });
 
-        let footerText = `\nSee you soon! 🍽️\nWarm regards,\nTeam Chopras`;
+        // --- ANTI-BAN DYNAMIC POLYSIGNATURE ---
+        // Attaching a micro timestamp at the end tricks scanners tracking identical bulk strings
+        let structuralFingerprint = `\n_Ref ID: ${Date.now().toString().slice(-6)}_\n`;
+        let footerText = `\nSee you soon! 🍽️\nWarm regards,\nTeam Chopras${structuralFingerprint}`;
+        
         const textTemplate = `${headerText}${greetingText}${bodyText}${footerText}`;
 
-        // --- DYNAMIC CONDITIONING LOGIC END ---
-
+        // Send directly. Browser runtime gracefully fails to catch block if number is dead.
         await client.sendMessage(structuralChatId, textTemplate);
         return res.status(200).json({ success: true, message: 'Message routed successfully.' });
     } catch (err) {
@@ -195,7 +189,6 @@ app.post('/api/v1/send-lead', async (req, res) => {
     }
 });
 
-// 6. Bind to Hugging Face Container Allocation Port
 const APP_PORT = 7860;
 app.listen(APP_PORT, '0.0.0.0', () => {
     console.log(`🚀 API Container active on port ${APP_PORT}`);
