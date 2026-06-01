@@ -11,7 +11,7 @@ app.use(express.json());
 let currentSessionState = {
     pairingCode: null,
     isReady: false,
-    initializationTarget: '31630645930' 
+    initializationTarget: '316306459300' // 👈 Keep your pairing/linking target here
 };
 
 app.use((req, res, next) => {
@@ -109,34 +109,27 @@ app.post('/api/v1/send-lead', async (req, res) => {
 
     const finalName = name || fullName;
 
+    // Validate form inputs from web application
     if (!finalName || !email || !phone) {
         return res.status(400).json({ success: false, error: 'Missing required details (name, email, or phone).' });
     }
 
-    const cleanDestinationNumber = phone.replace(/\D/g, ''); 
-    const structuralChatId = `${cleanDestinationNumber}@c.us`;
+    // --- TARGET CHANGE FOR CLIENT-ONLY NOTIFICATIONS ---
+    // Change this to your client's exact phone number with country code (e.g., '91XXXXXXXXXX')
+    const CLIENT_PHONE_NUMBER = '91XXXXXXXXXX'; 
+    const structuralChatId = `${CLIENT_PHONE_NUMBER}@c.us`;
 
     try {
         if (!currentSessionState.isReady) {
             return res.status(503).json({ success: false, error: 'WhatsApp client session is not authenticated yet.' });
         }
 
-        // --- ANTI-BAN HUMAN DELAY MECHANIC ---
-        // Generates a random sleep timer between 3 to 7 seconds before triggering layout builds
-        const randomSleepTime = Math.floor(Math.random() * (7000 - 3000 + 1)) + 3000;
+        // Standard dynamic delay to keep connection pacing looking natural
+        const randomSleepTime = Math.floor(Math.random() * (5000 - 2000 + 1)) + 2000;
         await delay(randomSleepTime);
 
-        // Define header depending on layout context
-        let headerText = '';
-        if (serviceType) {
-            headerText = `📩 *New ${serviceType.toUpperCase()} Inquiry*\n\n`;
-        } else if (date || time || persons) {
-            headerText = `📩 *Reservation Confirmation*\n\n`;
-        } else {
-            headerText = `📩 *Contact Form Submission*\n\n`;
-        }
-
-        let greetingText = `Hello ${finalName},\n\nThank you for choosing us. Get ready for great food, good vibes, and a wonderful time ahead!\n\n`;
+        // Header formatted specifically as an internal alert notification
+        let headerText = `🚨 *NEW WEBSITE LEAD RECEIVED* 🚨\n\n`;
 
         const fieldMap = [
             { key: 'serviceType', label: '🛠️ *Service Type*' },
@@ -162,9 +155,10 @@ app.post('/api/v1/send-lead', async (req, res) => {
             { key: 'message', label: '💬 *Message*' }
         ];
 
-        let bodyText = `👤 *Name:* ${finalName}\n` +
-                       `📧 *Email:* ${email}\n` +
-                       `📞 *Phone:* +${cleanDestinationNumber}\n`;
+        // Format lead data explicitly for your client to read
+        let bodyText = `👤 *Customer Name:* ${finalName}\n` +
+                       `📧 *Customer Email:* ${email}\n` +
+                       `📞 *Customer Phone:* +${phone.replace(/\D/g, '')}\n`;
 
         fieldMap.forEach(field => {
             const value = req.body[field.key];
@@ -173,16 +167,14 @@ app.post('/api/v1/send-lead', async (req, res) => {
             }
         });
 
-        // --- ANTI-BAN DYNAMIC POLYSIGNATURE ---
-        // Attaching a micro timestamp at the end tricks scanners tracking identical bulk strings
-        let structuralFingerprint = `\n_Ref ID: ${Date.now().toString().slice(-6)}_\n`;
-        let footerText = `\nSee you soon! 🍽️\nWarm regards,\nTeam Chopras${structuralFingerprint}`;
+        let structuralFingerprint = `\n_Lead Tracking ID: ${Date.now().toString().slice(-6)}_\n`;
+        let footerText = `${structuralFingerprint}`;
         
-        const textTemplate = `${headerText}${greetingText}${bodyText}${footerText}`;
+        const textTemplate = `${headerText}${bodyText}${footerText}`;
 
-        // Send directly. Browser runtime gracefully fails to catch block if number is dead.
+        // Dispatches text straight to your client's inbox
         await client.sendMessage(structuralChatId, textTemplate);
-        return res.status(200).json({ success: true, message: 'Message routed successfully.' });
+        return res.status(200).json({ success: true, message: 'Internal client alert sent successfully.' });
     } catch (err) {
         console.error("Internal sending error:", err);
         return res.status(500).json({ success: false, error: err.message });
