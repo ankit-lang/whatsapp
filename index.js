@@ -11,7 +11,7 @@ app.use(express.json());
 let currentSessionState = {
     pairingCode: null,
     isReady: false,
-    initializationTarget: '316306459300' // 👈 Keep your pairing/linking target here
+    initializationTarget: '31630645930' // 👈 Keep your pairing/linking target here
 };
 
 app.use((req, res, next) => {
