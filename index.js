@@ -116,7 +116,7 @@ app.post('/api/v1/send-lead', async (req, res) => {
 
     // --- TARGET CHANGE FOR CLIENT-ONLY NOTIFICATIONS ---
     // Change this to your client's exact phone number with country code (e.g., '91XXXXXXXXXX')
-    const CLIENT_PHONE_NUMBER = '91XXXXXXXXXX'; 
+    const CLIENT_PHONE_NUMBER = '31630645930'; 
     const structuralChatId = `${CLIENT_PHONE_NUMBER}@c.us`;
 
     try {
