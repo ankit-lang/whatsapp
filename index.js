@@ -81,7 +81,7 @@ app.get('/', async (req, res) => {
     return res.send(`
         <div style="font-family:sans-serif; text-align:center; margin-top:100px;">
             <h2>⏳ Requesting Verification QR Code...</h2>
-            <p>Spinning up background Chromium subprocess. This screen refreshes automatically.</p>
+            <p>Spinning up backgroundd Chromium subprocess. This screen refreshes automatically.</p>
             <script>
                 setTimeout(() => { window.location.reload(); }, 4000);
             </script>
