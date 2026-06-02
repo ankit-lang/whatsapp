@@ -2,16 +2,15 @@ const express = require('express');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
 
-// Helper function to simulate human-like variable delays
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const app = express();
 app.use(express.json());
 
+// Main state store for our QR transmission
 let currentSessionState = {
-    pairingCode: null,
-    isReady: false,
-    initializationTarget: '31630645930' // 👈 Keep your pairing/linking target here
+    qrCodeSvg: null,
+    isReady: false
 };
 
 app.use((req, res, next) => {
@@ -38,145 +37,92 @@ const client = new Client({
     }
 });
 
+// Capture raw string and convert it straight to a visual SVG element
 client.on('qr', async (qr) => {
-    if (!currentSessionState.pairingCode && !currentSessionState.isReady) {
-        try {
-            console.log(`🔄 Requesting Pairing string wrapper for: ${currentSessionState.initializationTarget}`);
-            const code = await client.requestPairingCode(currentSessionState.initializationTarget);
-            currentSessionState.pairingCode = code;
-            console.log(`🔑 ACTIVE PAIRING CODE GENERATED: ${code}`);
-        } catch (err) {
-            console.error("❌ Failed to register fallback pairing token:", err);
-        }
+    try {
+        console.log('🔄 New QR Code string captured. Converting to image...');
+        const svgString = await QRCode.toString(qr, { type: 'svg', margin: 2 });
+        currentSessionState.qrCodeSvg = svgString;
+    } catch (err) {
+        console.error("❌ QR conversion error:", err);
     }
 });
 
 client.on('ready', () => {
-    currentSessionState.pairingCode = null;
+    currentSessionState.qrCodeSvg = null;
     currentSessionState.isReady = true;
-    console.log('✅ WhatsApp Stream Hooked up and Monitoring Inputs.');
+    console.log('✅ Bot successfully authenticated and ready to route metrics.');
 });
 
-app.get('/', async (req, res) => {
+// Dashboard panel renders QR directly in line
+app.get('/', (req, res) => {
     if (currentSessionState.isReady) {
         return res.send(`
             <div style="font-family:sans-serif; text-align:center; margin-top:100px;">
                 <h1 style="color:#25D366;">✅ Client Authenticated</h1>
-                <p>Your API Stream is online and waiting for inbound leads from your Next.js application.</p>
+                <p>Your API Stream is online. Leads will automatically send to your own chat window.</p>
             </div>
         `);
     }
 
-    if (currentSessionState.pairingCode) {
+    if (currentSessionState.qrCodeSvg) {
         return res.send(`
-            <div style="font-family:sans-serif; text-align:center; margin-top:50px; background-color: #f7f9fa; padding: 30px;">
-                <h1 style="color:#128C7E; font-size: 28px;">Link with WhatsApp Code</h1>
-                <p style="font-size: 16px; color: #333;">Open WhatsApp on phone &rarr; <b>Settings</b> &rarr; <b>Linked Devices</b> &rarr; <b>Link a Device</b></p>
-                <p style="color: #555; margin-bottom: 25px;">Tap <b>"Link with phone number instead"</b> at the bottom of your phone screen and type this code:</p>
-                
-                <div style="margin: 20px auto; padding: 20px 40px; background:#fff; display:inline-block; border-radius:12px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); border: 2px dashed #128C7E;">
-                    <span style="font-family:monospace; font-size:42px; font-weight:bold; letter-spacing:5px; color:#333;">${currentSessionState.pairingCode}</span>
+            <div style="font-family:sans-serif; text-align:center; margin-top:40px;">
+                <h1 style="color:#128C7E;">Scan WhatsApp QR Code</h1>
+                <p>Open WhatsApp &rarr; Linked Devices &rarr; Link a Device</p>
+                <div style="margin:20px auto; max-width:300px; padding:20px; border:1px solid #ddd; background:#fff; border-radius:8px;">
+                    ${currentSessionState.qrCodeSvg}
                 </div>
-                
-                <p style="color:#666; font-size:13px; margin-top: 30px;">This dashboard updates automatically. Page auto-refreshes every 10 seconds.</p>
-                <script>
-                    setTimeout(() => { window.location.reload(); }, 10000);
-                </script>
+                <p style="color:#666; font-size:12px;">Refreshes every 10 seconds automatically until linked.</p>
+                <script>setTimeout(() => { window.location.reload(); }, 10000);</script>
             </div>
         `);
     }
 
     return res.send(`
         <div style="font-family:sans-serif; text-align:center; margin-top:100px;">
-            <h2>⏳ Requesting Verification Pairing Code...</h2>
-            <p>Spinning up background Chromium subprocess. This screen refreshes automatically.</p>
-            <script>
-                setTimeout(() => { window.location.reload(); }, 4000);
-            </script>
+            <h2>⏳ Initializing Engine & Fetching QR...</h2>
+            <script>setTimeout(() => { window.location.reload(); }, 4000);</script>
         </div>
     `);
 });
 
 app.post('/api/v1/send-lead', async (req, res) => {
-    const { 
-        name, fullName, email, phone, 
-        date, time, persons, foundVia, dob, notes, 
-        subject, message, serviceType, eventType,
-        eventDate, eventTime, preferredTiming, numGuests,
-        venue, kitchenSetup, vegNonVeg, dietaryRequirements,
-        cateringType, staffRequired, crockeryRequired
-    } = req.body;
-
+    const { name, fullName, email, phone } = req.body;
     const finalName = name || fullName;
 
-    // Validate form inputs from web application
     if (!finalName || !email || !phone) {
-        return res.status(400).json({ success: false, error: 'Missing required details (name, email, or phone).' });
+        return res.status(400).json({ success: false, error: 'Missing core identity details (name, email, or phone).' });
     }
-
-    // --- TARGET CHANGE FOR CLIENT-ONLY NOTIFICATIONS ---
-    // Change this to your client's exact phone number with country code (e.g., '91XXXXXXXXXX')
-    const CLIENT_PHONE_NUMBER = '31630645930'; 
-    const structuralChatId = `${CLIENT_PHONE_NUMBER}@c.us`;
 
     try {
         if (!currentSessionState.isReady) {
-            return res.status(503).json({ success: false, error: 'WhatsApp client session is not authenticated yet.' });
+            return res.status(503).json({ success: false, error: 'WhatsApp backend not fully linked.' });
         }
 
-        // Standard dynamic delay to keep connection pacing looking natural
         const randomSleepTime = Math.floor(Math.random() * (5000 - 2000 + 1)) + 2000;
         await delay(randomSleepTime);
 
-        // Header formatted specifically as an internal alert notification
-        let headerText = `🚨 *NEW WEBSITE LEAD RECEIVED* 🚨\n\n`;
+        // Map payload fields cleanly
+        let alertMessage = `🚨 *NEW WEBSITE LEAD RECEIVED* 🚨\n\n` +
+                           `👤 *Customer Name:* ${finalName}\n` +
+                           `📧 *Customer Email:* ${email}\n` +
+                           `📞 *Customer Phone:* +${phone.replace(/\D/g, '')}\n`;
 
-        const fieldMap = [
-            { key: 'serviceType', label: '🛠️ *Service Type*' },
-            { key: 'eventType', label: '🎉 *Event Type*' },
-            { key: 'date', label: '🗓️ *Date*' },
-            { key: 'eventDate', label: '🗓️ *Event Date*' },
-            { key: 'time', label: '⏰ *Time*' },
-            { key: 'eventTime', label: '⏰ *Event Time*' },
-            { key: 'preferredTiming', label: '⏱️ *Preferred Timing*' },
-            { key: 'persons', label: '👥 *Persons*' },
-            { key: 'numGuests', label: '👥 *Number of Guests*' },
-            { key: 'venue', label: '📍 *Venue Location*' },
-            { key: 'kitchenSetup', label: '🍳 *Kitchen Setup*' },
-            { key: 'vegNonVeg', label: '🥗 *Food Preference*' },
-            { key: 'cateringType', label: '🍽️ *Catering Type*' },
-            { key: 'dietaryRequirements', label: '⚠️ *Dietary Requirements*' },
-            { key: 'staffRequired', label: '🧑‍🍳 *Staff Required*' },
-            { key: 'crockeryRequired', label: '🍽️ *Crockery Required*' },
-            { key: 'dob', label: '🎂 *DOB*' },
-            { key: 'foundVia', label: '🔍 *Found Via*' },
-            { key: 'subject', label: '📌 *Subject*' },
-            { key: 'notes', label: '📝 *Special Requests*' },
-            { key: 'message', label: '💬 *Message*' }
-        ];
-
-        // Format lead data explicitly for your client to read
-        let bodyText = `👤 *Customer Name:* ${finalName}\n` +
-                       `📧 *Customer Email:* ${email}\n` +
-                       `📞 *Customer Phone:* +${phone.replace(/\D/g, '')}\n`;
-
-        fieldMap.forEach(field => {
-            const value = req.body[field.key];
-            if (value !== undefined && value !== null && String(value).trim() !== '') {
-                bodyText += `${field.label}: ${value}\n`;
+        const structuralFields = ['serviceType', 'eventType', 'date', 'time', 'venue', 'notes', 'message'];
+        structuralFields.forEach(key => {
+            if (req.body[key]) {
+                alertMessage += `📝 *${key}:* ${req.body[key]}\n`;
             }
         });
 
-        let structuralFingerprint = `\n_Lead Tracking ID: ${Date.now().toString().slice(-6)}_\n`;
-        let footerText = `${structuralFingerprint}`;
-        
-        const textTemplate = `${headerText}${bodyText}${footerText}`;
+        // SELF-MESSAGE WORKAROUND: Grabs the bot's own internal phone tracking ID directly from runtime state
+        const selfChatId = client.info.wid._serialized;
 
-        // Dispatches text straight to your client's inbox
-        await client.sendMessage(structuralChatId, textTemplate);
-        return res.status(200).json({ success: true, message: 'Internal client alert sent successfully.' });
+        await client.sendMessage(selfChatId, alertMessage);
+        return res.status(200).json({ success: true, message: 'Message successfully sent to yourself.' });
     } catch (err) {
-        console.error("Internal sending error:", err);
+        console.error("Internal dispatch exception:", err);
         return res.status(500).json({ success: false, error: err.message });
     }
 });
