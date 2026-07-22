@@ -1,16 +1,14 @@
 const express = require('express');
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const QRCode = require('qrcode');
-
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const app = express();
 app.use(express.json());
 
+let sock;
 let currentSessionState = {
     qrCodeSvg: null,
-    isReady: false,
-    isInitializing: false
+    isReady: false
 };
 
 app.use((req, res, next) => {
@@ -21,92 +19,51 @@ app.use((req, res, next) => {
     next();
 });
 
-// Configure Client with persistent session flags & stealth settings
-const client = new Client({
-    authStrategy: new LocalAuth({ dataPath: './session_store' }),
-    puppeteer: {
-        headless: true,
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
-        navigationTimeout: 90000,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-zygote',
-            '--disable-gpu',
-            '--no-first-run',
-            '--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-        ]
-    }
-});
+async function connectToWhatsApp() {
+    const { state, saveCreds } = await useMultiFileAuthState('./session_store');
 
-// 1. Capture QR Code
-client.on('qr', async (qr) => {
-    try {
-        console.log('🔄 New QR Code received. Please scan in browser.');
-        const svgString = await QRCode.toString(qr, { type: 'svg', margin: 2 });
-        currentSessionState.qrCodeSvg = svgString;
-        currentSessionState.isReady = false;
-        currentSessionState.isInitializing = false;
-    } catch (err) {
-        console.error("❌ QR conversion error:", err);
-    }
-});
+    sock = makeWASocket({
+        auth: state,
+        printQRInTerminal: false,
+        browser: ['Chopras Lead Bot', 'Chrome', '1.0.0']
+    });
 
-// 2. Session Ready Event
-client.on('ready', () => {
-    currentSessionState.qrCodeSvg = null;
-    currentSessionState.isReady = true;
-    currentSessionState.isInitializing = false;
-    console.log('✅ WhatsApp session active and authenticated.');
-    
-    // Keep-Alive Ping every 10 minutes to prevent WhatsApp idle disconnection
-    setInterval(async () => {
-        try {
-            if (currentSessionState.isReady) {
-                const state = await client.getState();
-                console.log(`💓 Keep-alive ping state: ${state}`);
+    sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+
+        if (qr) {
+            console.log('🔄 New QR Code generated.');
+            currentSessionState.qrCodeSvg = await QRCode.toString(qr, { type: 'svg', margin: 2 });
+            currentSessionState.isReady = false;
+        }
+
+        if (connection === 'open') {
+            console.log('✅ WhatsApp Connected successfully via Baileys!');
+            currentSessionState.qrCodeSvg = null;
+            currentSessionState.isReady = true;
+        }
+
+        if (connection === 'close') {
+            currentSessionState.isReady = false;
+            const statusCode = (lastDisconnect?.error)?.output?.statusCode;
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+            console.log('⚠️ Connection closed. Reconnecting:', shouldReconnect);
+            if (shouldReconnect) {
+                setTimeout(connectToWhatsApp, 3000);
             }
-        } catch (e) {
-            console.warn('⚠️ Keep-alive check failed:', e.message);
         }
-    }, 10 * 60 * 1000);
-});
+    });
+}
 
-// 3. Automatic Recovery Handlers
-client.on('auth_failure', (msg) => {
-    console.error('❌ Auth failure. Session corrupted:', msg);
-    currentSessionState.isReady = false;
-    currentSessionState.qrCodeSvg = null;
-    currentSessionState.isInitializing = false;
-});
-
-client.on('disconnected', async (reason) => {
-    console.log('⚠️ Session disconnected:', reason);
-    currentSessionState.isReady = false;
-    currentSessionState.qrCodeSvg = null;
-
-    if (!currentSessionState.isInitializing) {
-        currentSessionState.isInitializing = true;
-        console.log('🔄 Attempting session auto-reconnect in 5 seconds...');
-        await delay(5000);
-        try {
-            await client.initialize();
-        } catch (err) {
-            console.error('❌ Reconnection failed:', err.message);
-            currentSessionState.isInitializing = false;
-        }
-    }
-});
-
-// Web Status Interface
-app.get('/', async (req, res) => {
+// Web UI to view QR Code
+app.get('/', (req, res) => {
     if (currentSessionState.isReady) {
         return res.send(`
             <div style="font-family:sans-serif; text-align:center; margin-top:100px;">
-                <h1 style="color:#25D366;">✅ WhatsApp Session Connected</h1>
-                <p>Session is saved and online. Leads are monitored automatically.</p>
+                <h1 style="color:#25D366;">✅ WhatsApp Connected</h1>
+                <p>Baileys WebSocket engine is online and monitoring leads.</p>
             </div>
         `);
     }
@@ -114,8 +71,7 @@ app.get('/', async (req, res) => {
     if (currentSessionState.qrCodeSvg) {
         return res.send(`
             <div style="font-family:sans-serif; text-align:center; margin-top:40px;">
-                <h1 style="color:#128C7E; font-size: 28px;">Scan WhatsApp QR Code</h1>
-                <p style="font-size: 16px; color: #333;">Open WhatsApp on phone &rarr; <b>Settings</b> &rarr; <b>Linked Devices</b> &rarr; <b>Link a Device</b></p>
+                <h1 style="color:#128C7E;">Scan WhatsApp QR Code</h1>
                 <div style="margin:20px auto; max-width:300px; padding:20px; border:1px solid #ddd; background:#fff; border-radius:12px;">
                     ${currentSessionState.qrCodeSvg}
                 </div>
@@ -125,29 +81,26 @@ app.get('/', async (req, res) => {
 
     return res.send(`
         <div style="font-family:sans-serif; text-align:center; margin-top:100px;">
-            <h2>⏳ Initializing WhatsApp Session...</h2>
-            <p>Loading saved session credentials or requesting new QR code...</p>
-            <script>setTimeout(() => { window.location.reload(); }, 4000);</script>
+            <h2>⏳ Initializing WhatsApp Engine...</h2>
+            <script>setTimeout(() => { window.location.reload(); }, 3000);</script>
         </div>
     `);
 });
 
-// Send Lead Endpoint
+// Endpoint to send website lead alerts
 app.post('/api/v1/send-lead', async (req, res) => {
     const { name, fullName, email, phone } = req.body;
     const finalName = name || fullName;
 
     if (!finalName || !email || !phone) {
-        return res.status(400).json({ success: false, error: 'Missing required details (name, email, or phone).' });
+        return res.status(400).json({ success: false, error: 'Missing required details.' });
+    }
+
+    if (!currentSessionState.isReady || !sock) {
+        return res.status(503).json({ success: false, error: 'WhatsApp is not connected yet.' });
     }
 
     try {
-        if (!currentSessionState.isReady) {
-            return res.status(503).json({ success: false, error: 'WhatsApp client is not connected. Check server status.' });
-        }
-
-        await delay(1000);
-
         let bodyText = `🚨 *NEW WEBSITE LEAD RECEIVED* 🚨\n\n` +
                        `👤 *Customer Name:* ${finalName}\n` +
                        `📧 *Customer Email:* ${email}\n` +
@@ -163,23 +116,22 @@ app.post('/api/v1/send-lead', async (req, res) => {
         ];
 
         fieldMap.forEach(field => {
-            const value = req.body[field.key];
-            if (value) bodyText += `${field.label}: ${value}\n`;
+            if (req.body[field.key]) bodyText += `${field.label}: ${req.body[field.key]}\n`;
         });
 
-        const selfChatId = client.info.wid._serialized;
-        await client.sendMessage(selfChatId, bodyText);
+        // Send to your own WhatsApp account
+        const selfJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+        await sock.sendMessage(selfJid, { text: bodyText });
 
-        return res.status(200).json({ success: true, message: 'Lead sent to WhatsApp successfully.' });
+        return res.status(200).json({ success: true, message: 'Lead sent successfully.' });
     } catch (err) {
-        console.error("Internal sending error:", err);
+        console.error('Error sending message:', err);
         return res.status(500).json({ success: false, error: err.message });
     }
 });
 
-const APP_PORT = 7860;
-app.listen(APP_PORT, '0.0.0.0', () => {
-    console.log(`🚀 API Container active on port ${APP_PORT}`);
-    currentSessionState.isInitializing = true;
-    client.initialize();
+const PORT = 7860;
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 API Container active on port ${PORT}`);
+    connectToWhatsApp();
 });
