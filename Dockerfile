@@ -11,3 +11,13 @@ RUN npm install
 
 # Copy the rest of your app code
 COPY . .
+
+# Hugging Face container networking & SSL compatibility flags
+ENV NODE_OPTIONS="--dns-result-order=ipv4first"
+ENV NODE_TLS_REJECT_UNAUTHORIZED="0"
+
+# Hugging Face Spaces default port
+EXPOSE 7860
+
+# Start the application
+CMD ["node", "index.js"]
