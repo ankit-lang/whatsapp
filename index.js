@@ -252,6 +252,7 @@ app.post('/api/v1/send-lead', async (req, res) => {
         // Send to your own WhatsApp account
         const selfJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
         await sock.sendMessage(selfJid, { text: bodyText });
+        console.log(`📩 Lead message sent successfully to WhatsApp for ${finalName} (+${phone.replace(/\D/g, '')})`);
 
         return res.status(200).json({ success: true, message: 'Lead sent successfully.' });
     } catch (err) {
