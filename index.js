@@ -16,6 +16,9 @@ const customAgent = new https.Agent({
 });
 
 const SESSION_DIR = path.join(__dirname, 'session_store');
+const CONNECT_TIMEOUT_MS = Number(process.env.BAILEYS_CONNECT_TIMEOUT_MS || 120000);
+const QUERY_TIMEOUT_MS = Number(process.env.BAILEYS_QUERY_TIMEOUT_MS || 120000);
+const MAX_RECONNECT_DELAY_MS = Number(process.env.BAILEYS_MAX_RECONNECT_DELAY_MS || 60000);
 
 // Restore session from SESSION_BASE64 environment variable if directory is missing or empty
 function restoreSessionFromEnv() {
@@ -79,6 +82,29 @@ let currentSessionState = {
     qrCodeSvg: null,
     isReady: false
 };
+let isConnecting = false;
+let reconnectAttempts = 0;
+let reconnectTimer = null;
+
+function calculateReconnectDelay(attempt) {
+    const baseDelayMs = 5000;
+    return Math.min(baseDelayMs * (2 ** attempt), MAX_RECONNECT_DELAY_MS);
+}
+
+function scheduleReconnect(reason) {
+    if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+    }
+
+    const delay = calculateReconnectDelay(reconnectAttempts);
+    reconnectAttempts = Math.min(reconnectAttempts + 1, 10);
+    console.log(`🔁 Scheduling reconnect in ${delay / 1000}s due to ${reason}`);
+
+    reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connectToWhatsApp();
+    }, delay);
+}
 
 app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
@@ -89,46 +115,53 @@ app.use((req, res, next) => {
 });
 
 async function connectToWhatsApp() {
-    restoreSessionFromEnv();
-
-    const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
-    
-    // Quick fallback version to prevent HF network delays
-    let version = [2, 3000, 1015901307];
-    try {
-        const latest = await Promise.race([
-            fetchLatestBaileysVersion(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
-        ]);
-        if (latest && latest.version) version = latest.version;
-    } catch (e) {
-        console.log('ℹ️ Using default Baileys version for fast connection handshake.');
+    if (isConnecting) {
+        console.log('⏳ Connection attempt already in progress; skipping duplicate connect request.');
+        return;
     }
 
-    sock = makeWASocket({
-        version,
-        auth: state,
-        printQRInTerminal: false,
-        browser: ['Ubuntu', 'Chrome', '110.0.5563.146'],
-        syncFullHistory: false,
-        markOnlineOnConnect: false,
-        connectTimeoutMs: 60000,
-        defaultQueryTimeoutMs: 60000,
-        qrTimeout: 60000,
-        keepAliveIntervalMs: 25000,
-        retryRequestDelayMs: 3000,
-        maxMsgRetryCount: 5,
-        agent: customAgent,
-        fetchAgent: customAgent,
-        options: {
-            agent: customAgent,
-            rejectUnauthorized: false,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
-                'Origin': 'https://web.whatsapp.com'
-            }
+    isConnecting = true;
+    restoreSessionFromEnv();
+
+    try {
+        const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
+
+        // Quick fallback version to prevent HF network delays
+        let version = [2, 3000, 1015901307];
+        try {
+            const latest = await Promise.race([
+                fetchLatestBaileysVersion(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
+            ]);
+            if (latest && latest.version) version = latest.version;
+        } catch (e) {
+            console.log('ℹ️ Using default Baileys version for fast connection handshake.');
         }
-    });
+
+        sock = makeWASocket({
+            version,
+            auth: state,
+            printQRInTerminal: false,
+            browser: ['Ubuntu', 'Chrome', '110.0.5563.146'],
+            syncFullHistory: false,
+            markOnlineOnConnect: false,
+            connectTimeoutMs: CONNECT_TIMEOUT_MS,
+            defaultQueryTimeoutMs: QUERY_TIMEOUT_MS,
+            qrTimeout: CONNECT_TIMEOUT_MS,
+            keepAliveIntervalMs: 30000,
+            retryRequestDelayMs: 5000,
+            maxMsgRetryCount: 8,
+            agent: customAgent,
+            fetchAgent: customAgent,
+            options: {
+                agent: customAgent,
+                rejectUnauthorized: false,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
+                    'Origin': 'https://web.whatsapp.com'
+                }
+            }
+        });
 
     sock.ev.on('creds.update', async () => {
         await saveCreds();
@@ -139,45 +172,52 @@ async function connectToWhatsApp() {
         }
     });
 
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
+        sock.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect, qr } = update;
 
-        if (qr) {
-            console.log('\n🔄 New QR Code generated!');
-            console.log(`📱 Open your Hugging Face Space app URL to scan the QR Code!\n`);
-            currentSessionState.qrCodeSvg = await QRCode.toString(qr, { type: 'svg', margin: 2 });
-            currentSessionState.isReady = false;
-        }
-
-        if (connection === 'open') {
-            console.log('✅ WhatsApp Connected successfully via Baileys!');
-            currentSessionState.qrCodeSvg = null;
-            currentSessionState.isReady = true;
-            
-            const sessionB64 = exportSessionToBase64();
-            if (sessionB64) {
-                console.log('🔐 [SESSION BACKUP GENERATED] Copy this Base64 string into your SESSION_BASE64 environment variable so your deployment NEVER logs out:\n');
-                console.log(sessionB64);
-                console.log('\n------------------------------------------------------------\n');
+            if (qr) {
+                console.log('\n🔄 New QR Code generated!');
+                console.log(`📱 Open your Hugging Face Space app URL to scan the QR Code!\n`);
+                currentSessionState.qrCodeSvg = await QRCode.toString(qr, { type: 'svg', margin: 2 });
+                currentSessionState.isReady = false;
             }
-        }
 
-        if (connection === 'close') {
-            currentSessionState.isReady = false;
-            const statusCode = (lastDisconnect?.error)?.output?.statusCode;
-            const reason = lastDisconnect?.error?.message || 'Unknown Disconnect';
-            const isLoggedOut = statusCode === DisconnectReason.loggedOut;
-            
-            console.log(`⚠️ Connection closed. Reason: ${reason} (Code: ${statusCode}). Reconnecting: ${!isLoggedOut}`);
-            
-            if (isLoggedOut) {
-                console.log('❌ Device was manually logged out from WhatsApp. Clear session_store to re-scan QR code.');
-            } else {
-                // Reconnect automatically after 5s for Hugging Face network handshakes
-                setTimeout(connectToWhatsApp, 5000);
+            if (connection === 'open') {
+                isConnecting = false;
+                reconnectAttempts = 0;
+                console.log('✅ WhatsApp Connected successfully via Baileys!');
+                currentSessionState.qrCodeSvg = null;
+                currentSessionState.isReady = true;
+
+                const sessionB64 = exportSessionToBase64();
+                if (sessionB64) {
+                    console.log('🔐 [SESSION BACKUP GENERATED] Copy this Base64 string into your SESSION_BASE64 environment variable so your deployment NEVER logs out:\n');
+                    console.log(sessionB64);
+                    console.log('\n------------------------------------------------------------\n');
+                }
             }
-        }
-    });
+
+            if (connection === 'close') {
+                isConnecting = false;
+                currentSessionState.isReady = false;
+                const statusCode = (lastDisconnect?.error)?.output?.statusCode;
+                const reason = lastDisconnect?.error?.message || 'Unknown Disconnect';
+                const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+
+                console.log(`⚠️ Connection closed. Reason: ${reason} (Code: ${statusCode}). Reconnecting: ${!isLoggedOut}`);
+
+                if (isLoggedOut) {
+                    console.log('❌ Device was manually logged out from WhatsApp. Clear session_store to re-scan QR code.');
+                } else {
+                    scheduleReconnect(reason);
+                }
+            }
+        });
+    } catch (err) {
+        isConnecting = false;
+        console.error('❌ Failed to initialize Baileys connection:', err.message);
+        scheduleReconnect(err.message);
+    }
 }
 
 // Web UI to view QR Code or Session Export
@@ -215,6 +255,16 @@ app.get('/', (req, res) => {
             <script>setTimeout(() => { window.location.reload(); }, 3000);</script>
         </div>
     `);
+});
+
+// Simple health endpoint for deployment platforms such as Render
+app.get('/health', (req, res) => {
+    res.status(200).json({
+        ok: true,
+        ready: currentSessionState.isReady,
+        qrAvailable: !!currentSessionState.qrCodeSvg,
+        timestamp: new Date().toISOString()
+    });
 });
 
 // Endpoint to send website lead alerts
@@ -276,8 +326,18 @@ function startKeepAlive() {
     }, 4 * 60 * 1000); // Pings every 4 minutes
 }
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 API Container active on port ${PORT}`);
-    connectToWhatsApp();
-    startKeepAlive();
-});
+if (require.main === module) {
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`🚀 API Container active on port ${PORT}`);
+        connectToWhatsApp();
+        startKeepAlive();
+    });
+}
+
+module.exports = {
+    app,
+    connectToWhatsApp,
+    calculateReconnectDelay,
+    exportSessionToBase64,
+    restoreSessionFromEnv
+};

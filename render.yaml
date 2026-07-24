@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: whatsapp-gateway
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_OPTIONS
+        value: --dns-result-order=ipv4first
+      - key: NODE_TLS_REJECT_UNAUTHORIZED
+        value: "0"
