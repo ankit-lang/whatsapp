@@ -106,6 +106,70 @@ function scheduleReconnect(reason) {
     }, delay);
 }
 
+function buildLeadMessage(body = {}) {
+    const finalName = body.name || body.fullName || body.customerName || body.contactName || 'Unknown';
+    const email = body.email || body.customerEmail || 'N/A';
+    const phone = body.phone || body.mobile || body.phoneNumber || '';
+    const normalizedPhone = phone.replace(/\D/g, '');
+
+    let bodyText = `🚨 *NEW WEBSITE LEAD RECEIVED* 🚨\n\n` +
+        `👤 *Customer Name:* ${finalName}\n` +
+        `📧 *Customer Email:* ${email}\n` +
+        `📞 *Customer Phone:* ${normalizedPhone ? `+${normalizedPhone}` : 'N/A'}\n`;
+
+    const fieldMap = [
+        { key: 'serviceType', label: '🛠️ *Service Type*' },
+        { key: 'eventType', label: '🎉 *Event Type*' },
+        { key: 'eventDate', label: '🗓️ *Event Date*' },
+        { key: 'numGuests', label: '👥 *Guests*' },
+        { key: 'venue', label: '📍 *Venue*' },
+        { key: 'message', label: '💬 *Message*' }
+    ];
+
+    fieldMap.forEach(field => {
+        const value = body[field.key] ?? body[field.key.toUpperCase()] ?? body[`reservation_${field.key}`];
+        if (value) bodyText += `${field.label}: ${value}\n`;
+    });
+
+    const extraFields = [
+        ['reservationType', '🧾 *Reservation Type*'],
+        ['checkoutType', '🛒 *Checkout Type*'],
+        ['notes', '📝 *Notes*']
+    ];
+
+    extraFields.forEach(([key, label]) => {
+        const value = body[key] ?? body[key.toUpperCase()] ?? body[`reservation_${key}`];
+        if (value) bodyText += `${label}: ${value}\n`;
+    });
+
+    return {
+        finalName,
+        email,
+        phone: normalizedPhone,
+        bodyText
+    };
+}
+
+async function sendLeadNotification(body = {}) {
+    if (!currentSessionState.isReady || !sock) {
+        throw new Error('WhatsApp is not connected yet.');
+    }
+
+    const { finalName, email, phone, bodyText } = buildLeadMessage(body);
+
+    const selfJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+    await sock.sendMessage(selfJid, { text: bodyText });
+    console.log(`📩 Lead message sent successfully to WhatsApp for ${finalName} (${email})`);
+
+    return {
+        success: true,
+        finalName,
+        email,
+        phone,
+        whatsappMessage: bodyText
+    };
+}
+
 app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
@@ -267,6 +331,10 @@ app.get('/health', (req, res) => {
     });
 });
 
+app.get('/checkout-demo', (req, res) => {
+    res.sendFile(path.join(__dirname, 'checkout-demo.html'));
+});
+
 // Endpoint to send website lead alerts
 app.post('/api/v1/send-lead', async (req, res) => {
     const { name, fullName, email, phone } = req.body;
@@ -276,37 +344,29 @@ app.post('/api/v1/send-lead', async (req, res) => {
         return res.status(400).json({ success: false, error: 'Missing required details.' });
     }
 
-    if (!currentSessionState.isReady || !sock) {
-        return res.status(503).json({ success: false, error: 'WhatsApp is not connected yet.' });
-    }
-
     try {
-        let bodyText = `🚨 *NEW WEBSITE LEAD RECEIVED* 🚨\n\n` +
-                       `👤 *Customer Name:* ${finalName}\n` +
-                       `📧 *Customer Email:* ${email}\n` +
-                       `📞 *Customer Phone:* +${phone.replace(/\D/g, '')}\n`;
-
-        const fieldMap = [
-            { key: 'serviceType', label: '🛠️ *Service Type*' },
-            { key: 'eventType', label: '🎉 *Event Type*' },
-            { key: 'eventDate', label: '🗓️ *Event Date*' },
-            { key: 'numGuests', label: '👥 *Guests*' },
-            { key: 'venue', label: '📍 *Venue*' },
-            { key: 'message', label: '💬 *Message*' }
-        ];
-
-        fieldMap.forEach(field => {
-            if (req.body[field.key]) bodyText += `${field.label}: ${req.body[field.key]}\n`;
+        const result = await sendLeadNotification(req.body);
+        return res.status(200).json({
+            success: true,
+            message: 'Lead sent successfully.',
+            whatsappMessage: result.whatsappMessage
         });
-
-        // Send to your own WhatsApp account
-        const selfJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
-        await sock.sendMessage(selfJid, { text: bodyText });
-        console.log(`📩 Lead message sent successfully to WhatsApp for ${finalName} (+${phone.replace(/\D/g, '')})`);
-
-        return res.status(200).json({ success: true, message: 'Lead sent successfully.' });
     } catch (err) {
         console.error('Error sending message:', err);
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/v1/contact-reservation-checkout', async (req, res) => {
+    try {
+        const result = await sendLeadNotification(req.body);
+        return res.status(200).json({
+            success: true,
+            message: 'Reservation checkout message sent successfully.',
+            whatsappMessage: result.whatsappMessage
+        });
+    } catch (err) {
+        console.error('Error sending checkout message:', err);
         return res.status(500).json({ success: false, error: err.message });
     }
 });
@@ -338,6 +398,8 @@ module.exports = {
     app,
     connectToWhatsApp,
     calculateReconnectDelay,
+    buildLeadMessage,
+    sendLeadNotification,
     exportSessionToBase64,
     restoreSessionFromEnv
 };

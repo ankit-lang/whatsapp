@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reservation Checkout Demo</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 700px; margin: 40px auto; padding: 20px; }
+    form { display: grid; gap: 12px; }
+    input, textarea, button { padding: 10px; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <h1>Reservation Checkout Demo</h1>
+  <p>Submit the form and the WhatsApp message will be logged in the browser console and shown below.</p>
+
+  <form id="checkoutForm">
+    <input name="name" placeholder="Name" required />
+    <input name="email" type="email" placeholder="Email" required />
+    <input name="phone" placeholder="Phone" required />
+    <input name="serviceType" placeholder="Service Type" />
+    <input name="eventDate" placeholder="Event Date" />
+    <input name="venue" placeholder="Venue" />
+    <textarea name="message" placeholder="Message"></textarea>
+    <button type="submit">Submit Reservation</button>
+  </form>
+
+  <script>
+    const form = document.getElementById('checkoutForm');
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const formData = new FormData(form);
+      const payload = Object.fromEntries(formData.entries());
+
+      try {
+        const response = await fetch('/api/v1/contact-reservation-checkout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+        console.log('Checkout response:', data);
+        console.log('WhatsApp message:', data.whatsappMessage);
+      } catch (error) {
+        console.error('Checkout failed:', error);
+      }
+    });
+  </script>
+</body>
+</html>
