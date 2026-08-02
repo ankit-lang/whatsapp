@@ -20,38 +20,48 @@ const CONNECT_TIMEOUT_MS = Number(process.env.BAILEYS_CONNECT_TIMEOUT_MS || 1200
 const QUERY_TIMEOUT_MS = Number(process.env.BAILEYS_QUERY_TIMEOUT_MS || 120000);
 const MAX_RECONNECT_DELAY_MS = Number(process.env.BAILEYS_MAX_RECONNECT_DELAY_MS || 60000);
 
-// Restore session from SESSION_BASE64 environment variable if directory is missing or empty
+// Restore session from SESSION_BASE64 environment variable if session_store does not already exist or is missing creds.json
 function restoreSessionFromEnv() {
     try {
         if (!fs.existsSync(SESSION_DIR)) {
             fs.mkdirSync(SESSION_DIR, { recursive: true });
         }
-        
+
         const envSession = process.env.SESSION_BASE64 || process.env.SESSION_DATA;
         const credsFile = path.join(SESSION_DIR, 'creds.json');
-        
-        if (envSession && !fs.existsSync(credsFile)) {
-            console.log('📦 Restoring WhatsApp session credentials from SESSION_BASE64 environment variable...');
-            const buffer = Buffer.from(envSession, 'base64');
-            const jsonStr = buffer.toString('utf-8');
-            
-            // Check if it's a single creds.json content or multi-file JSON bundle
-            try {
-                const parsed = JSON.parse(jsonStr);
-                if (parsed['creds.json']) {
-                    // Multi-file bundle object
-                    for (const [filename, content] of Object.entries(parsed)) {
-                        fs.writeFileSync(path.join(SESSION_DIR, filename), typeof content === 'string' ? content : JSON.stringify(content));
-                    }
-                } else {
-                    // Single creds.json file
-                    fs.writeFileSync(credsFile, jsonStr);
+        const sessionFiles = fs.existsSync(SESSION_DIR)
+            ? fs.readdirSync(SESSION_DIR).filter(file => fs.statSync(path.join(SESSION_DIR, file)).isFile())
+            : [];
+
+        if (!envSession) {
+            return;
+        }
+
+        if (sessionFiles.length > 0 && fs.existsSync(credsFile)) {
+            console.log('✅ SESSION_BASE64 found, but existing session_store already contains saved credentials. Using current session_store files.');
+            return;
+        }
+
+        console.log('📦 Restoring WhatsApp session credentials from SESSION_BASE64 environment variable...');
+        const buffer = Buffer.from(envSession, 'base64');
+        const jsonStr = buffer.toString('utf-8');
+
+        // Check if it's a single creds.json content or multi-file JSON bundle
+        try {
+            const parsed = JSON.parse(jsonStr);
+            if (parsed['creds.json']) {
+                // Multi-file bundle object
+                for (const [filename, content] of Object.entries(parsed)) {
+                    fs.writeFileSync(path.join(SESSION_DIR, filename), typeof content === 'string' ? content : JSON.stringify(content));
                 }
-                console.log('✅ WhatsApp session restored successfully from environment variable!');
-            } catch (parseErr) {
+            } else {
+                // Single creds.json file
                 fs.writeFileSync(credsFile, jsonStr);
-                console.log('✅ WhatsApp creds.json written from environment variable!');
             }
+            console.log('✅ WhatsApp session restored successfully from environment variable!');
+        } catch (parseErr) {
+            fs.writeFileSync(credsFile, jsonStr);
+            console.log('✅ WhatsApp creds.json written from environment variable!');
         }
     } catch (err) {
         console.error('⚠️ Failed to restore session from env:', err.message);
