@@ -292,7 +292,7 @@ async function connectToWhatsApp() {
             version,
             auth: state,
             printQRInTerminal: false,
-            browser: Browsers.ubuntu('Chrome'),
+            browser: Browsers.macOS('Desktop'),
             syncFullHistory: false,
             markOnlineOnConnect: false,
             connectTimeoutMs: CONNECT_TIMEOUT_MS,
