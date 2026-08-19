@@ -243,15 +243,46 @@ async function sendLeadNotification(body = {}) {
 
     const { finalName, email, phone, bodyText } = buildLeadMessage(body);
 
+    const defaultNumbers = ['918178573528', '31630645930'];
+    const envNumbers = (process.env.CLIENT_WHATSAPP_NUMBER || process.env.TARGET_WHATSAPP_NUMBERS || '')
+        .split(',')
+        .map(n => normalizePhoneNumber(n))
+        .filter(Boolean);
+
     const selfJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
-    await sock.sendMessage(selfJid, { text: bodyText });
-    console.log(`📩 Lead message sent successfully to WhatsApp for ${finalName} (${email})`);
+    const targetNumbers = Array.from(new Set([...defaultNumbers, ...envNumbers]));
+    const sentRecipients = [];
+
+    // Send to self (Admin / Developer)
+    try {
+        await sock.sendMessage(selfJid, { text: bodyText });
+        sentRecipients.push(selfJid.split('@')[0]);
+    } catch (e) {
+        console.error('Failed to send to selfJid:', e.message);
+    }
+
+    // Send to client number (31630645930) and any configured target numbers
+    for (const num of targetNumbers) {
+        const jid = `${num}@s.whatsapp.net`;
+        if (jid !== selfJid) {
+            try {
+                await sock.sendMessage(jid, { text: bodyText });
+                sentRecipients.push(num);
+                console.log(`📩 Lead message sent to recipient ${num}`);
+            } catch (err) {
+                console.error(`⚠️ Failed to send lead to ${num}:`, err.message);
+            }
+        }
+    }
+
+    console.log(`📩 Lead notification sent successfully to WhatsApp for ${finalName} (${email}) to recipients: ${sentRecipients.join(', ')}`);
 
     return {
         success: true,
         finalName,
         email,
         phone,
+        recipients: sentRecipients,
         whatsappMessage: bodyText
     };
 }
