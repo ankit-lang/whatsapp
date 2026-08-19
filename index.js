@@ -19,12 +19,29 @@ const SESSION_DIR = path.join(__dirname, 'session_store');
 const CONNECT_TIMEOUT_MS = Number(process.env.BAILEYS_CONNECT_TIMEOUT_MS || 120000);
 const QUERY_TIMEOUT_MS = Number(process.env.BAILEYS_QUERY_TIMEOUT_MS || 120000);
 const MAX_RECONNECT_DELAY_MS = Number(process.env.BAILEYS_MAX_RECONNECT_DELAY_MS || 60000);
+let skipSessionRestoreFromEnv = false;
+
+function resetSessionIfRequested() {
+    if (process.env.RESET_SESSION !== 'true') {
+        return false;
+    }
+
+    fs.rmSync(SESSION_DIR, { recursive: true, force: true });
+    skipSessionRestoreFromEnv = true;
+    delete process.env.RESET_SESSION;
+    console.log('🧹 WhatsApp session cleared. A new QR code will be generated.');
+    return true;
+}
 
 // Restore session from SESSION_BASE64 environment variable if session_store does not already exist or is missing creds.json
 function restoreSessionFromEnv() {
     try {
         if (!fs.existsSync(SESSION_DIR)) {
             fs.mkdirSync(SESSION_DIR, { recursive: true });
+        }
+
+        if (skipSessionRestoreFromEnv) {
+            return;
         }
 
         const envSession = process.env.SESSION_BASE64 || process.env.SESSION_DATA;
@@ -297,16 +314,10 @@ async function connectToWhatsApp() {
 // Web UI to view QR Code or Session Export
 app.get('/', (req, res) => {
     if (currentSessionState.isReady) {
-        const sessionB64 = exportSessionToBase64();
         return res.send(`
             <div style="font-family:sans-serif; text-align:center; margin-top:60px; padding:20px;">
                 <h1 style="color:#25D366;">✅ WhatsApp Connected</h1>
                 <p>Baileys WebSocket engine is online and active.</p>
-                <div style="margin-top:30px; background:#f5f5f5; padding:15px; border-radius:8px; display:inline-block; max-width:800px; text-align:left; overflow-x:auto;">
-                    <h3>🔐 Persistent Session Key (For Deployment):</h3>
-                    <p style="font-size:13px; color:#555;">Set an Environment Variable named <code>SESSION_BASE64</code> with the value below in Hugging Face / Docker settings to prevent logging out on restart:</p>
-                    <textarea readonly style="width:100%; height:120px; font-family:monospace; font-size:11px; padding:8px;" onclick="this.select()">${sessionB64 || 'Generating...'}</textarea>
-                </div>
             </div>
         `);
     }
@@ -399,6 +410,7 @@ function startKeepAlive() {
 if (require.main === module) {
     app.listen(PORT, '0.0.0.0', () => {
         console.log(`🚀 API Container active on port ${PORT}`);
+        resetSessionIfRequested();
         connectToWhatsApp();
         startKeepAlive();
     });
@@ -411,5 +423,6 @@ module.exports = {
     buildLeadMessage,
     sendLeadNotification,
     exportSessionToBase64,
-    restoreSessionFromEnv
+    restoreSessionFromEnv,
+    resetSessionIfRequested
 };

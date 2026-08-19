@@ -2,7 +2,7 @@ services:
   - type: web
     name: whatsapp-gateway
     env: node
-    plan: free
+    plan: starter
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /health
@@ -13,3 +13,7 @@ services:
         value: --dns-result-order=ipv4first
       - key: NODE_TLS_REJECT_UNAUTHORIZED
         value: "0"
+    disk:
+      name: whatsapp-session
+      mountPath: /opt/render/project/src/session_store
+      sizeGB: 1
